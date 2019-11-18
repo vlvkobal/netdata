@@ -8,6 +8,42 @@ netdata_rwlock_t rrd_rwlock;
 
 char log_line[MAX_LOG_LINE + 1];
 
+
+static void test_exporting_config_file(void **state)
+{
+    struct config exporting_config;
+
+    memset(&exporting_config, 0, sizeof(exporting_config));
+
+    //struct engine *engine = __mock_read_exporting_config(); // TODO: use real read_exporting_config() function
+    *state = &exporting_config;
+    assert_ptr_equal(exporting_config.sections, NULL);
+//    assert_string_equal(engine->config.prefix, "netdata");
+//    assert_string_equal(engine->config.hostname, "test-host");
+//    assert_int_equal(engine->config.update_every, 3);
+//    assert_int_equal(engine->config.options, BACKEND_SOURCE_DATA_AVERAGE | BACKEND_OPTION_SEND_NAMES);
+//
+//    struct connector *connector = engine->connector_root;
+//    assert_ptr_not_equal(connector, NULL);
+//    assert_ptr_equal(connector->next, NULL);
+//    assert_ptr_equal(connector->engine, engine);
+//    assert_int_equal(connector->config.type, BACKEND_TYPE_GRAPHITE);
+//
+//    struct instance *instance = connector->instance_root;
+//    assert_ptr_not_equal(instance, NULL);
+//    assert_ptr_equal(instance->next, NULL);
+//    assert_ptr_equal(instance->connector, connector);
+//    assert_string_equal(instance->config.destination, "localhost");
+//    assert_int_equal(instance->config.update_every, 1);
+//    assert_int_equal(instance->config.buffer_on_failures, 10);
+//    assert_int_equal(instance->config.timeoutms, 10000);
+//    assert_string_equal(instance->config.charts_pattern, "*");
+//    assert_string_equal(instance->config.hosts_pattern, "localhost *");
+//    assert_int_equal(instance->config.send_names_instead_of_ids, 1);
+
+    teardown_configuration_file(state);
+}
+
 void init_connectors_in_tests(struct engine *engine)
 {
     expect_function_call(__wrap_uv_thread_create);
@@ -333,6 +369,7 @@ int main(void)
         cmocka_unit_test_setup_teardown(
             test_simple_connector_worker, setup_initialized_engine, teardown_initialized_engine),
         cmocka_unit_test(test_init_graphite_instance),
+        cmocka_unit_test_setup_teardown(test_exporting_config_file, setup_configuration_file, teardown_configuration_file),
     };
 
     return cmocka_run_group_tests_name("exporting_engine", tests, NULL, NULL);

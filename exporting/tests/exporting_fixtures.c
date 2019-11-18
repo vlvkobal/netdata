@@ -92,3 +92,35 @@ int teardown_initialized_engine(void **state)
 
     return 0;
 }
+
+
+int setup_configuration_file(void **state)
+{
+//    struct engine *engine = __mock_read_exporting_config();
+//
+//    engine->after = 1;
+//    engine->before = 2;
+//
+//    *state = engine;
+
+    return 0;
+}
+
+int teardown_configuration_file(void **state)
+{
+//    struct engine *engine = *state;
+//
+//    struct instance *instance = engine->connector_root->instance_root;
+//    free((void *)instance->config.destination);
+//    free(instance->config.charts_pattern);
+//    free(instance->config.hosts_pattern);
+//    free(instance);
+//
+//    free(engine->connector_root);
+//
+//    free((void *)engine->config.prefix);
+//    free((void *)engine->config.hostname);
+//    free(engine);
+
+    return 0;
+}
