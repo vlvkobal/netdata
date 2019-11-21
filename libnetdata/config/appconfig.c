@@ -62,6 +62,10 @@ _CONNECTOR_INSTANCE *add_connector_instance(struct section *connector, struct se
         local_ci = global_connector_instance;
         while (local_ci) {
             local_ci_tmp = local_ci->next;
+            freez(local_ci->connector->name);
+            freez(local_ci->instance->name);
+            freez(local_ci->connector);
+            freez(local_ci->instance);
             freez(local_ci);
             local_ci = local_ci_tmp;
         }
