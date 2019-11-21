@@ -82,6 +82,11 @@ int teardown_rrdhost();
 int setup_initialized_engine(void **state);
 int teardown_initialized_engine(void **state);
 
+int setup_configuration_file(void **state);
+int teardown_configuration_file(void **state);
+int get_connector_instance(struct connector_instance *target_ci);
+
+
 void init_connectors_in_tests(struct engine *engine);
 
 #endif /* TEST_EXPORTING_ENGINE_H */

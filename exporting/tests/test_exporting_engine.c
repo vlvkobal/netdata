@@ -8,6 +8,105 @@ netdata_rwlock_t rrd_rwlock;
 
 char log_line[MAX_LOG_LINE + 1];
 
+//static int test_exporting_config(void);
+
+struct section {
+    avl avl;                // the index entry of this section - this has to be first!
+
+    uint32_t hash;          // a simple hash to speed up searching
+    // we first compare hashes, and only if the hashes are equal we do string comparisons
+
+    char *name;
+
+    struct section *next;    // gloabl config_mutex protects just this
+
+    struct config_option *values;
+    avl_tree_lock values_index;
+
+    netdata_mutex_t mutex;  // this locks only the writers, to ensure atomic updates
+    // readers are protected using the rwlock in avl_tree_lock
+};
+
+
+int __test_appconfig_load(struct config *root, char *filename, int overwrite_used)
+{
+    static int init = 0;
+    struct section connector, instance;
+
+    if (!root && init) {
+        freez(connector.name);
+        freez(instance.name);
+        add_connector_instance(NULL, (void *)0x01);
+        init = 0;
+        return 1;
+    }
+
+    connector.name = strdupz("graphite");
+    instance.name = strdupz("test");
+    add_connector_instance(&connector, &instance);
+    init = 1;
+    return 1;
+}
+
+static void test_exporting_config_01 (void **state)
+{
+    struct connector_instance local_ci;
+    assert_ptr_equal(get_connector_instance(&local_ci), NULL);
+    // Cleanup the internal structure
+    add_connector_instance(NULL, (void *) 0x01);
+}
+
+static void test_exporting_config_02 (void **state)
+{
+    int exporting_config_exists;
+//    struct connector_instance_list {
+//        struct connector_instance local_ci;
+//        struct connector_instance_list *next;
+//    };
+    //struct connector_instance local_ci;
+
+    //assert_int_equal(get_connector_instance(NULL), 0    );
+
+    //assert_int_equal(get_connector_instance(&local_ci), 0);
+
+    //assert_int_equal(get_connector_instance(&local_ci), 1);
+
+    exporting_config_exists = __test_appconfig_load(&exporting_config, "/etc/netdata/exporting.conf", 0);
+    assert_int_equal(exporting_config_exists, 1);
+    __test_appconfig_load(NULL,NULL,0);     // cleanup
+    //add_connector_instance(NULL, (void *) 0x01);
+    //exporting_config_exists = appconfig_load(&exporting_config, "/etc/netdata/exporting.conf", 0);
+    //add_connector_instance(NULL,0x01);
+    //assert_ptr_not_equal(get_connector_instance(&local_ci), NULL);
+}
+
+
+//    assert_string_equal(engine->config.prefix, "netdata");
+//    assert_string_equal(engine->config.hostname, "test-host");
+//    assert_int_equal(engine->config.update_every, 3);
+//    assert_int_equal(engine->config.options, BACKEND_SOURCE_DATA_AVERAGE | BACKEND_OPTION_SEND_NAMES);
+//
+//    struct connector *connector = engine->connector_root;
+//    assert_ptr_not_equal(connector, NULL);
+//    assert_ptr_equal(connector->next, NULL);
+//    assert_ptr_equal(connector->engine, engine);
+//    assert_int_equal(connector->config.type, BACKEND_TYPE_GRAPHITE);
+//
+//    struct instance *instance = connector->instance_root;
+//    assert_ptr_not_equal(instance, NULL);
+//    assert_ptr_equal(instance->next, NULL);
+//    assert_ptr_equal(instance->connector, connector);
+//    assert_string_equal(instance->config.destination, "localhost");
+//    assert_int_equal(instance->config.update_every, 1);
+//    assert_int_equal(instance->config.buffer_on_failures, 10);
+//    assert_int_equal(instance->config.timeoutms, 10000);
+//    assert_string_equal(instance->config.charts_pattern, "*");
+//    assert_string_equal(instance->config.hosts_pattern, "localhost *");
+//    assert_int_equal(instance->config.send_names_instead_of_ids, 1);
+
+    //teardown_configuration_file(state);
+
+
 void init_connectors_in_tests(struct engine *engine)
 {
     expect_function_call(__wrap_now_realtime_sec);
@@ -336,8 +435,23 @@ static void test_init_graphite_instance(void **state)
     // process failures
 }
 
+static int test_exporting_config(void)
+{
+    const struct CMUnitTest tests[] = {
+        cmocka_unit_test(test_exporting_config_01),
+        cmocka_unit_test(test_exporting_config_02)
+    };
+
+//    printf("Done\n");
+//
+    return cmocka_run_group_tests_name("exporting_config", tests, NULL, NULL);
+};
+
 int main(void)
 {
+    // Run tests for the config file itself
+    test_exporting_config();
+
     const struct CMUnitTest tests[] = {
         cmocka_unit_test_setup_teardown(test_exporting_engine, setup_initialized_engine, teardown_initialized_engine),
         cmocka_unit_test(test_read_exporting_config),
@@ -356,7 +470,7 @@ int main(void)
             test_simple_connector_send_buffer, setup_initialized_engine, teardown_initialized_engine),
         cmocka_unit_test_setup_teardown(
             test_simple_connector_worker, setup_initialized_engine, teardown_initialized_engine),
-        cmocka_unit_test(test_init_graphite_instance),
+        cmocka_unit_test(test_init_graphite_instance)
     };
 
     return cmocka_run_group_tests_name("exporting_engine", tests, NULL, NULL);
