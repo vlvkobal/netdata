@@ -8,7 +8,7 @@ netdata_rwlock_t rrd_rwlock;
 
 char log_line[MAX_LOG_LINE + 1];
 
-static int test_exporting_config(void);
+//static int test_exporting_config(void);
 
 struct section {
     avl avl;                // the index entry of this section - this has to be first!
@@ -30,38 +30,30 @@ struct section {
 
 int __test_appconfig_load(struct config *root, char *filename, int overwrite_used)
 {
+    static int init = 0;
     struct section connector, instance;
 
-    if (!root) {
-       freez(connector.name);
-       freez(instance.name);
-       add_connector_instance(NULL, (void *) 0x01);
+    if (!root && init) {
+        freez(connector.name);
+        freez(instance.name);
+        add_connector_instance(NULL, (void *)0x01);
+        init = 0;
+        return 1;
     }
 
     connector.name = strdupz("graphite");
     instance.name = strdupz("test");
     add_connector_instance(&connector, &instance);
+    init = 1;
     return 1;
 }
 
 static void test_exporting_config_01 (void **state)
 {
-    //struct connector_instance_list {
-    //    struct connector_instance local_ci;
-    //    struct connector_instance_list *next;
-    //};
     struct connector_instance local_ci;
-    //struct config exporting_config;
-    //memset(&exporting_config, 0, sizeof(exporting_config));
-    //get_connector_instance(&local_ci);
-    //struct engine *engine = __mock_read_exporting_config(); // TODO: use real read_exporting_config() function
-    //*state = &exporting_config;
     assert_ptr_equal(get_connector_instance(&local_ci), NULL);
-
     // Cleanup the internal structure
     add_connector_instance(NULL, (void *) 0x01);
-    //exporting_config_exists = __test_appconfig_load(&exporting_config, "/etc/netdata/exporting.conf", 0);
-    //assert_int_equal(exporting_config_exists, 1);
 }
 
 static void test_exporting_config_02 (void **state)
@@ -71,12 +63,13 @@ static void test_exporting_config_02 (void **state)
 //        struct connector_instance local_ci;
 //        struct connector_instance_list *next;
 //    };
-//    struct connector_instance local_ci;
+    //struct connector_instance local_ci;
 
-    //get_connector_instance(NULL);
-    //assert_ptr_equal(get_connector_instance(NULL), NULL);
-    //get_connector_instance(&local_ci);
-//    assert_ptr_not_equal(get_connector_instance(&local_ci), NULL);
+    //assert_int_equal(get_connector_instance(NULL), 0    );
+
+    //assert_int_equal(get_connector_instance(&local_ci), 0);
+
+    //assert_int_equal(get_connector_instance(&local_ci), 1);
 
     exporting_config_exists = __test_appconfig_load(&exporting_config, "/etc/netdata/exporting.conf", 0);
     assert_int_equal(exporting_config_exists, 1);
@@ -427,8 +420,8 @@ static int test_exporting_config(void)
         cmocka_unit_test(test_exporting_config_02)
     };
 
-    printf("Done\n");
-
+//    printf("Done\n");
+//
     return cmocka_run_group_tests_name("exporting_config", tests, NULL, NULL);
 };
 
