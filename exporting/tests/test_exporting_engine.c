@@ -131,7 +131,7 @@ static void test_read_exporting_config(void **state)
     assert_string_equal(engine->config.prefix, "netdata");
     assert_string_equal(engine->config.hostname, "test-host");
     assert_int_equal(engine->config.update_every, 3);
-    assert_int_equal(engine->config.options, BACKEND_SOURCE_DATA_AVERAGE | BACKEND_OPTION_SEND_NAMES);
+    assert_int_equal(engine->instance_num, 0);
 
     struct connector *connector = engine->connector_root;
     assert_ptr_not_equal(connector, NULL);
@@ -147,9 +147,9 @@ static void test_read_exporting_config(void **state)
     assert_int_equal(instance->config.update_every, 1);
     assert_int_equal(instance->config.buffer_on_failures, 10);
     assert_int_equal(instance->config.timeoutms, 10000);
-    assert_string_equal(instance->config.charts_pattern, "*");
-    assert_string_equal(instance->config.hosts_pattern, "localhost *");
-    assert_int_equal(instance->config.send_names_instead_of_ids, 1);
+    assert_true(simple_pattern_matches(instance->config.charts_pattern, "any_chart"));
+    assert_true(simple_pattern_matches(instance->config.hosts_pattern, "anyt_host"));
+    assert_int_equal(instance->config.options, EXPORTING_SOURCE_DATA_AS_COLLECTED | EXPORTING_OPTION_SEND_NAMES);
 
     teardown_configured_engine(state);
 }
@@ -160,26 +160,41 @@ static void test_init_connectors(void **state)
 
     init_connectors_in_tests(engine);
 
+    assert_int_equal(engine->instance_num, 1);
+
     struct connector *connector = engine->connector_root;
     assert_ptr_equal(connector->next, NULL);
-    assert_ptr_equal(connector->start_batch_formatting, NULL);
-    assert_ptr_equal(connector->start_host_formatting, NULL);
-    assert_ptr_equal(connector->start_chart_formatting, NULL);
-    assert_ptr_equal(connector->metric_formatting, format_dimension_collected_graphite_plaintext);
-    assert_ptr_equal(connector->end_chart_formatting, NULL);
-    assert_ptr_equal(connector->end_host_formatting, NULL);
-    assert_ptr_equal(connector->end_batch_formatting, NULL);
     assert_ptr_equal(connector->worker, simple_connector_worker);
 
     struct simple_connector_config *connector_specific_config = connector->config.connector_specific_config;
     assert_int_equal(connector_specific_config->default_port, 2003);
 
-    assert_ptr_equal(connector->instance_root->next, NULL);
+    struct instance *instance = connector->instance_root;
+    assert_ptr_equal(instance->next, NULL);
+    assert_int_equal(instance->index, 0);
+    assert_ptr_equal(instance->start_batch_formatting, NULL);
+    assert_ptr_equal(instance->start_host_formatting, NULL);
+    assert_ptr_equal(instance->start_chart_formatting, NULL);
+    assert_ptr_equal(instance->metric_formatting, format_dimension_collected_graphite_plaintext);
+    assert_ptr_equal(instance->end_chart_formatting, NULL);
+    assert_ptr_equal(instance->end_host_formatting, NULL);
+    assert_ptr_equal(instance->end_batch_formatting, NULL);
 
-    BUFFER *buffer = connector->instance_root->buffer;
+    BUFFER *buffer = instance->buffer;
     assert_ptr_not_equal(buffer, NULL);
     buffer_sprintf(buffer, "%s", "graphite test");
     assert_string_equal(buffer_tostring(buffer), "graphite test");
+}
+
+static void test_init_graphite_instance(void **state)
+{
+    struct engine *engine = *state;
+    struct instance *instance = engine->connector_root->instance_root;
+
+    instance->config.options = EXPORTING_SOURCE_DATA_AVERAGE | EXPORTING_OPTION_SEND_NAMES;
+
+    assert_int_equal(init_graphite_instance(instance), 0);
+    assert_ptr_equal(instance->metric_formatting, format_dimension_stored_graphite_plaintext);
 }
 
 static void test_mark_scheduled_instances(void **state)
@@ -193,32 +208,149 @@ static void test_mark_scheduled_instances(void **state)
     assert_int_equal(instance->before, 2);
 }
 
+static void test_rrdhost_is_exportable(void **state)
+{
+    struct engine *engine = *state;
+    struct instance *instance = engine->connector_root->instance_root;
+
+    expect_function_call(__wrap_info_int);
+
+    assert_ptr_equal(localhost->exporting_flags, NULL);
+
+    assert_int_equal(__real_rrdhost_is_exportable(instance, localhost), 1);
+
+    assert_string_equal(log_line, "enabled exporting of host 'localhost' for instance 'instance_name'");
+
+    assert_ptr_not_equal(localhost->exporting_flags, NULL);
+    assert_int_equal(localhost->exporting_flags[0], RRDHOST_FLAG_BACKEND_SEND);
+}
+
+static void test_false_rrdhost_is_exportable(void **state)
+{
+    struct engine *engine = *state;
+    struct instance *instance = engine->connector_root->instance_root;
+
+    simple_pattern_free(instance->config.hosts_pattern);
+    instance->config.hosts_pattern = simple_pattern_create("!*", NULL, SIMPLE_PATTERN_EXACT);
+
+    expect_function_call(__wrap_info_int);
+
+    assert_ptr_equal(localhost->exporting_flags, NULL);
+
+    assert_int_equal(__real_rrdhost_is_exportable(instance, localhost), 0);
+
+    assert_string_equal(log_line, "disabled exporting of host 'localhost' for instance 'instance_name'");
+
+    assert_ptr_not_equal(localhost->exporting_flags, NULL);
+    assert_int_equal(localhost->exporting_flags[0], RRDHOST_FLAG_BACKEND_DONT_SEND);
+}
+
+static void test_rrdset_is_exportable(void **state)
+{
+    struct engine *engine = *state;
+    struct instance *instance = engine->connector_root->instance_root;
+    RRDSET *st = localhost->rrdset_root;
+
+    assert_ptr_equal(st->exporting_flags, NULL);
+
+    assert_int_equal(__real_rrdset_is_exportable(instance, st), 1);
+
+    assert_ptr_not_equal(st->exporting_flags, NULL);
+    assert_int_equal(st->exporting_flags[0], RRDSET_FLAG_BACKEND_SEND);
+}
+
+static void test_false_rrdset_is_exportable(void **state)
+{
+    struct engine *engine = *state;
+    struct instance *instance = engine->connector_root->instance_root;
+    RRDSET *st = localhost->rrdset_root;
+
+    simple_pattern_free(instance->config.charts_pattern);
+    instance->config.charts_pattern = simple_pattern_create("!*", NULL, SIMPLE_PATTERN_EXACT);
+
+    assert_ptr_equal(st->exporting_flags, NULL);
+
+    assert_int_equal(__real_rrdset_is_exportable(instance, st), 0);
+
+    assert_ptr_not_equal(st->exporting_flags, NULL);
+    assert_int_equal(st->exporting_flags[0], RRDSET_FLAG_BACKEND_IGNORE);
+}
+
+static void test_exporting_calculate_value_from_stored_data(void **state)
+{
+    struct engine *engine = *state;
+    struct instance *instance = engine->connector_root->instance_root;
+    RRDDIM *rd = localhost->rrdset_root->dimensions;
+    time_t timestamp;
+
+    instance->after = 3;
+    instance->before = 10;
+
+    expect_function_call(__mock_rrddim_query_oldest_time);
+    will_return(__mock_rrddim_query_oldest_time, 1);
+
+    expect_function_call(__mock_rrddim_query_latest_time);
+    will_return(__mock_rrddim_query_latest_time, 2);
+
+    expect_function_call(__mock_rrddim_query_init);
+    expect_value(__mock_rrddim_query_init, start_time, 1);
+    expect_value(__mock_rrddim_query_init, end_time, 2);
+
+    expect_function_call(__mock_rrddim_query_is_finished);
+    will_return(__mock_rrddim_query_is_finished, 0);
+    expect_function_call(__mock_rrddim_query_next_metric);
+    will_return(__mock_rrddim_query_next_metric, pack_storage_number(27, SN_EXISTS));
+
+    expect_function_call(__mock_rrddim_query_is_finished);
+    will_return(__mock_rrddim_query_is_finished, 0);
+    expect_function_call(__mock_rrddim_query_next_metric);
+    will_return(__mock_rrddim_query_next_metric, pack_storage_number(45, SN_EXISTS));
+
+    expect_function_call(__mock_rrddim_query_is_finished);
+    will_return(__mock_rrddim_query_is_finished, 1);
+
+    expect_function_call(__mock_rrddim_query_finalize);
+
+    assert_int_equal(__real_exporting_calculate_value_from_stored_data(instance, rd, &timestamp), 36);
+}
+
 static void test_prepare_buffers(void **state)
 {
     struct engine *engine = *state;
-
-    struct connector *connector = engine->connector_root;
-    connector->start_batch_formatting = __mock_start_batch_formatting;
-    connector->start_host_formatting = __mock_start_host_formatting;
-    connector->start_chart_formatting = __mock_start_chart_formatting;
-    connector->metric_formatting = __mock_metric_formatting;
-    connector->end_chart_formatting = __mock_end_chart_formatting;
-    connector->end_host_formatting = __mock_end_host_formatting;
-    connector->end_batch_formatting = __mock_end_batch_formatting;
-
     struct instance *instance = engine->connector_root->instance_root;
+
+    instance->start_batch_formatting = __mock_start_batch_formatting;
+    instance->start_host_formatting = __mock_start_host_formatting;
+    instance->start_chart_formatting = __mock_start_chart_formatting;
+    instance->metric_formatting = __mock_metric_formatting;
+    instance->end_chart_formatting = __mock_end_chart_formatting;
+    instance->end_host_formatting = __mock_end_host_formatting;
+    instance->end_batch_formatting = __mock_end_batch_formatting;
     __real_mark_scheduled_instances(engine);
 
     expect_function_call(__mock_start_batch_formatting);
     expect_value(__mock_start_batch_formatting, instance, instance);
     will_return(__mock_start_batch_formatting, 0);
 
+    expect_function_call(__wrap_rrdhost_is_exportable);
+    expect_value(__wrap_rrdhost_is_exportable, instance, instance);
+    expect_value(__wrap_rrdhost_is_exportable, host, localhost);
+    will_return(__wrap_rrdhost_is_exportable, 1);
+
     expect_function_call(__mock_start_host_formatting);
     expect_value(__mock_start_host_formatting, instance, instance);
+    expect_value(__mock_start_host_formatting, host, localhost);
     will_return(__mock_start_host_formatting, 0);
+
+    RRDSET *st = localhost->rrdset_root;
+    expect_function_call(__wrap_rrdset_is_exportable);
+    expect_value(__wrap_rrdset_is_exportable, instance, instance);
+    expect_value(__wrap_rrdset_is_exportable, st, st);
+    will_return(__wrap_rrdset_is_exportable, 1);
 
     expect_function_call(__mock_start_chart_formatting);
     expect_value(__mock_start_chart_formatting, instance, instance);
+    expect_value(__mock_start_chart_formatting, st, st);
     will_return(__mock_start_chart_formatting, 0);
 
     RRDDIM *rd = localhost->rrdset_root->dimensions;
@@ -229,10 +361,12 @@ static void test_prepare_buffers(void **state)
 
     expect_function_call(__mock_end_chart_formatting);
     expect_value(__mock_end_chart_formatting, instance, instance);
+    expect_value(__mock_end_chart_formatting, st, st);
     will_return(__mock_end_chart_formatting, 0);
 
     expect_function_call(__mock_end_host_formatting);
     expect_value(__mock_end_host_formatting, instance, instance);
+    expect_value(__mock_end_host_formatting, host, localhost);
     will_return(__mock_end_host_formatting, 0);
 
     expect_function_call(__mock_end_batch_formatting);
@@ -244,13 +378,13 @@ static void test_prepare_buffers(void **state)
     assert_int_equal(instance->stats.chart_buffered_metrics, 1);
 
     // check with NULL functions
-    connector->start_batch_formatting = NULL;
-    connector->start_host_formatting = NULL;
-    connector->start_chart_formatting = NULL;
-    connector->metric_formatting = NULL;
-    connector->end_chart_formatting = NULL;
-    connector->end_host_formatting = NULL;
-    connector->end_batch_formatting = NULL;
+    instance->start_batch_formatting = NULL;
+    instance->start_host_formatting = NULL;
+    instance->start_chart_formatting = NULL;
+    instance->metric_formatting = NULL;
+    instance->end_chart_formatting = NULL;
+    instance->end_host_formatting = NULL;
+    instance->end_batch_formatting = NULL;
     assert_int_equal(__real_prepare_buffers(engine), 0);
 
     assert_int_equal(instance->scheduled, 0);
@@ -279,6 +413,20 @@ static void test_format_dimension_collected_graphite_plaintext(void **state)
         "netdata.test-host.chart_name.dimension_name;TAG1=VALUE1 TAG2=VALUE2 123000321 15051\n");
 }
 
+static void test_format_dimension_stored_graphite_plaintext(void **state)
+{
+    struct engine *engine = *state;
+
+    expect_function_call(__wrap_exporting_calculate_value_from_stored_data);
+    will_return(__wrap_exporting_calculate_value_from_stored_data, pack_storage_number(27, SN_EXISTS));
+
+    RRDDIM *rd = localhost->rrdset_root->dimensions;
+    assert_int_equal(format_dimension_stored_graphite_plaintext(engine->connector_root->instance_root, rd), 0);
+    assert_string_equal(
+        buffer_tostring(engine->connector_root->instance_root->buffer),
+        "netdata.test-host.chart_name.dimension_name;TAG1=VALUE1 TAG2=VALUE2 690565856.0000000 15052\n");
+}
+
 static void test_exporting_discard_response(void **state)
 {
     struct engine *engine = *state;
@@ -292,7 +440,7 @@ static void test_exporting_discard_response(void **state)
 
     assert_string_equal(
         log_line,
-        "EXPORTING: received 13 bytes from (null) connector instance. Ignoring them. Sample: 'Test response'");
+        "EXPORTING: received 13 bytes from instance_name connector instance. Ignoring them. Sample: 'Test response'");
 
     assert_int_equal(buffer_strlen(response), 0);
 
@@ -318,7 +466,8 @@ static void test_simple_connector_receive_response(void **state)
     simple_connector_receive_response(&sock, instance);
 
     assert_string_equal(
-        log_line, "EXPORTING: received 9 bytes from (null) connector instance. Ignoring them. Sample: 'Test recv'");
+        log_line,
+        "EXPORTING: received 9 bytes from instance_name connector instance. Ignoring them. Sample: 'Test recv'");
 
     assert_int_equal(stats->chart_received_bytes, 9);
     assert_int_equal(stats->chart_receptions, 1);
@@ -336,6 +485,18 @@ static void test_simple_connector_send_buffer(void **state)
     int failures = 3;
 
     __real_mark_scheduled_instances(engine);
+
+    expect_function_call(__wrap_rrdhost_is_exportable);
+    expect_value(__wrap_rrdhost_is_exportable, instance, instance);
+    expect_value(__wrap_rrdhost_is_exportable, host, localhost);
+    will_return(__wrap_rrdhost_is_exportable, 1);
+
+    RRDSET *st = localhost->rrdset_root;
+    expect_function_call(__wrap_rrdset_is_exportable);
+    expect_value(__wrap_rrdset_is_exportable, instance, instance);
+    expect_value(__wrap_rrdset_is_exportable, st, st);
+    will_return(__wrap_rrdset_is_exportable, 1);
+
     __real_prepare_buffers(engine);
 
     expect_function_call(__wrap_send);
@@ -366,6 +527,18 @@ static void test_simple_connector_worker(void **state)
     BUFFER *buffer = instance->buffer;
 
     __real_mark_scheduled_instances(engine);
+
+    expect_function_call(__wrap_rrdhost_is_exportable);
+    expect_value(__wrap_rrdhost_is_exportable, instance, instance);
+    expect_value(__wrap_rrdhost_is_exportable, host, localhost);
+    will_return(__wrap_rrdhost_is_exportable, 1);
+
+    RRDSET *st = localhost->rrdset_root;
+    expect_function_call(__wrap_rrdset_is_exportable);
+    expect_value(__wrap_rrdset_is_exportable, instance, instance);
+    expect_value(__wrap_rrdset_is_exportable, st, st);
+    will_return(__wrap_rrdset_is_exportable, 1);
+
     __real_prepare_buffers(engine);
 
     expect_function_call(__wrap_connect_to_one_of);
@@ -385,16 +558,6 @@ static void test_simple_connector_worker(void **state)
     expect_value(__wrap_send, flags, MSG_NOSIGNAL);
 
     simple_connector_worker(instance);
-}
-
-static void test_init_graphite_instance(void **state)
-{
-    (void)state;
-
-    // receive responce
-    // reconnect if it's needed
-    // send data
-    // process failures
 }
 
 static int test_exporting_config(void)
@@ -417,11 +580,25 @@ int main(void)
         cmocka_unit_test(test_read_exporting_config),
         cmocka_unit_test_setup_teardown(test_init_connectors, setup_configured_engine, teardown_configured_engine),
         cmocka_unit_test_setup_teardown(
+            test_init_graphite_instance, setup_configured_engine, teardown_configured_engine),
+        cmocka_unit_test_setup_teardown(
             test_mark_scheduled_instances, setup_initialized_engine, teardown_initialized_engine),
+        cmocka_unit_test_setup_teardown(
+            test_rrdhost_is_exportable, setup_initialized_engine, teardown_initialized_engine),
+        cmocka_unit_test_setup_teardown(
+            test_false_rrdhost_is_exportable, setup_initialized_engine, teardown_initialized_engine),
+        cmocka_unit_test_setup_teardown(
+            test_rrdset_is_exportable, setup_initialized_engine, teardown_initialized_engine),
+        cmocka_unit_test_setup_teardown(
+            test_false_rrdset_is_exportable, setup_initialized_engine, teardown_initialized_engine),
+        cmocka_unit_test_setup_teardown(
+            test_exporting_calculate_value_from_stored_data, setup_initialized_engine, teardown_initialized_engine),
         cmocka_unit_test_setup_teardown(test_prepare_buffers, setup_initialized_engine, teardown_initialized_engine),
         cmocka_unit_test(test_exporting_name_copy),
         cmocka_unit_test_setup_teardown(
             test_format_dimension_collected_graphite_plaintext, setup_initialized_engine, teardown_initialized_engine),
+        cmocka_unit_test_setup_teardown(
+            test_format_dimension_stored_graphite_plaintext, setup_initialized_engine, teardown_initialized_engine),
         cmocka_unit_test_setup_teardown(
             test_exporting_discard_response, setup_initialized_engine, teardown_initialized_engine),
         cmocka_unit_test_setup_teardown(
@@ -430,7 +607,6 @@ int main(void)
             test_simple_connector_send_buffer, setup_initialized_engine, teardown_initialized_engine),
         cmocka_unit_test_setup_teardown(
             test_simple_connector_worker, setup_initialized_engine, teardown_initialized_engine),
-        cmocka_unit_test(test_init_graphite_instance)
     };
 
     return cmocka_run_group_tests_name("exporting_engine", tests, NULL, NULL);

@@ -150,6 +150,8 @@ RRDHOST *rrdhost_create(const char *hostname,
 #ifdef ENABLE_HTTPS
     host->ssl.conn = NULL;
     host->ssl.flags = NETDATA_SSL_START;
+    host->stream_ssl.conn = NULL;
+    host->stream_ssl.flags = NETDATA_SSL_START;
 #endif
 
     netdata_mutex_init(&host->rrdpush_sender_buffer_mutex);
@@ -594,6 +596,8 @@ void rrdhost_free(RRDHOST *host) {
 
     while(host->rrdset_root)
         rrdset_free(host->rrdset_root);
+
+    freez(host->exporting_flags);
 
     while(host->alarms)
         rrdcalc_unlink_and_free(host, host->alarms);

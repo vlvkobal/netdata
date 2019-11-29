@@ -3,7 +3,7 @@
 #include "graphite.h"
 
 /**
- * Initialize connectors
+ * Format dimension using collected data for graphine connector
  *
  * @param instance an instance data structure.
  * @param rd a dimension.
@@ -18,13 +18,13 @@ int format_dimension_collected_graphite_plaintext(struct instance *instance, RRD
     char chart_name[RRD_ID_LENGTH_MAX + 1];
     exporting_name_copy(
         chart_name,
-        (engine->config.options & BACKEND_OPTION_SEND_NAMES && st->name) ? st->name : st->id,
+        (instance->config.options & EXPORTING_OPTION_SEND_NAMES && st->name) ? st->name : st->id,
         RRD_ID_LENGTH_MAX);
 
     char dimension_name[RRD_ID_LENGTH_MAX + 1];
     exporting_name_copy(
         dimension_name,
-        (engine->config.options & BACKEND_OPTION_SEND_NAMES && rd->name) ? rd->name : rd->id,
+        (instance->config.options & EXPORTING_OPTION_SEND_NAMES && rd->name) ? rd->name : rd->id,
         RRD_ID_LENGTH_MAX);
 
     buffer_sprintf(
@@ -43,6 +43,55 @@ int format_dimension_collected_graphite_plaintext(struct instance *instance, RRD
 }
 
 /**
+ * Format dimension using a calculated value from stored data for graphine connector
+ *
+ * @param instance an instance data structure.
+ * @param rd a dimension.
+ * @return Always returns 0.
+ */
+int format_dimension_stored_graphite_plaintext(struct instance *instance, RRDDIM *rd)
+{
+    struct engine *engine = instance->connector->engine;
+    RRDSET *st = rd->rrdset;
+    RRDHOST *host = st->rrdhost;
+
+    char chart_name[RRD_ID_LENGTH_MAX + 1];
+    exporting_name_copy(
+        chart_name,
+        (instance->config.options & EXPORTING_OPTION_SEND_NAMES && st->name) ? st->name : st->id,
+        RRD_ID_LENGTH_MAX);
+
+    char dimension_name[RRD_ID_LENGTH_MAX + 1];
+    exporting_name_copy(
+        dimension_name,
+        (instance->config.options & EXPORTING_OPTION_SEND_NAMES && rd->name) ? rd->name : rd->id,
+        RRD_ID_LENGTH_MAX);
+
+    time_t last_t;
+    calculated_number value = exporting_calculate_value_from_stored_data(instance, rd, &last_t);
+
+    if(isnan(value))
+        return 0;
+
+    buffer_sprintf(
+            instance->buffer
+            , "%s.%s.%s.%s%s%s " CALCULATED_NUMBER_FORMAT " %llu\n"
+            , engine->config.prefix
+            , engine->config.hostname
+            , chart_name
+            , dimension_name
+            , (host->tags)?";":""
+            , (host->tags)?host->tags:""
+            , value
+            , (unsigned long long) last_t
+    );
+
+    return 0;
+
+    return 0;
+}
+
+/**
  * Initialize Graphite connector
  *
  * @param instance a connector data structure.
@@ -50,14 +99,6 @@ int format_dimension_collected_graphite_plaintext(struct instance *instance, RRD
  */
 int init_graphite_connector(struct connector *connector)
 {
-    connector->start_batch_formatting = NULL;
-    connector->start_host_formatting = NULL;
-    connector->start_chart_formatting = NULL;
-    connector->metric_formatting = format_dimension_collected_graphite_plaintext;
-    connector->end_chart_formatting = NULL;
-    connector->end_host_formatting = NULL;
-    connector->end_batch_formatting = NULL;
-
     connector->worker = simple_connector_worker;
 
     struct simple_connector_config *connector_specific_config = mallocz(sizeof(struct simple_connector_config));
@@ -75,6 +116,19 @@ int init_graphite_connector(struct connector *connector)
  */
 int init_graphite_instance(struct instance *instance)
 {
+    instance->start_batch_formatting = NULL;
+    instance->start_host_formatting = NULL;
+    instance->start_chart_formatting = NULL;
+
+    if (EXPORTING_OPTIONS_DATA_SOURCE(instance->config.options) == EXPORTING_SOURCE_DATA_AS_COLLECTED)
+        instance->metric_formatting = format_dimension_collected_graphite_plaintext;
+    else
+        instance->metric_formatting = format_dimension_stored_graphite_plaintext;
+
+    instance->end_chart_formatting = NULL;
+    instance->end_host_formatting = NULL;
+    instance->end_batch_formatting = NULL;
+
     instance->buffer = (void *)buffer_create(0);
     if (!instance->buffer) {
         error("EXPORTING: cannot create buffer for graphite exporting connector instance %s", instance->config.name);

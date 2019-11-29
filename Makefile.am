@@ -240,7 +240,7 @@ NFACCT_PLUGIN_FILES = \
 
 SLABINFO_PLUGIN_FILES = \
     collectors/slabinfo.plugin/slabinfo.c \
-    $(LIBNETDATA_FILES)
+    $(LIBNETDATA_FILES) \
     $(NULL)
 
 XENSTAT_PLUGIN_FILES = \
@@ -458,6 +458,7 @@ EXPORTING_ENGINE_FILES = \
     exporting/read_config.c \
     exporting/init_connectors.c \
     exporting/process_data.c \
+    exporting/check_filters.c \
     exporting/send_data.c \
     exporting/send_internal_metrics.c \
     $(NULL)
@@ -663,9 +664,34 @@ if ENABLE_UNITTESTS
         libnetdata/storage_number/tests/storage_number_testdriver \
         exporting/tests/exporting_engine_testdriver \
         web/api/tests/web_api_testdriver \
+        web/api/tests/valid_urls_testdriver \
         $(NULL)
 
     TESTS = $(check_PROGRAMS)
+
+    web_api_tests_valid_urls_testdriver_LDFLAGS = \
+        -Wl,--wrap=rrdhost_find_by_hostname \
+        -Wl,--wrap=finished_web_request_statistics \
+        -Wl,--wrap=config_get \
+        -Wl,--wrap=web_client_api_request_v1 \
+        -Wl,--wrap=rrdhost_find_by_guid \
+        -Wl,--wrap=rrdset_find_byname \
+        -Wl,--wrap=rrdset_find \
+        -Wl,--wrap=rrdpush_receiver_thread_spawn \
+        -Wl,--wrap=debug_int \
+        -Wl,--wrap=error_int \
+        -Wl,--wrap=info_int \
+        -Wl,--wrap=fatal_int \
+        -Wl,--wrap=mysendfile \
+        -DREMOVE_MYSENDFILE \
+        $(TEST_LDFLAGS) \
+        $(NULL)
+    web_api_tests_valid_urls_testdriver_SOURCES = \
+        web/api/tests/valid_urls.c \
+        web/server/web_client.c \
+        $(LIBNETDATA_FILES) \
+        $(NULL)
+    web_api_tests_valid_urls_testdriver_LDADD = $(NETDATA_COMMON_LIBS) $(TEST_LIBS)
 
     web_api_tests_web_api_testdriver_LDFLAGS = \
         -Wl,--wrap=rrdhost_find_by_hostname \
@@ -679,6 +705,7 @@ if ENABLE_UNITTESTS
         -Wl,--wrap=debug_int \
         -Wl,--wrap=error_int \
         -Wl,--wrap=info_int \
+        -Wl,--wrap=fatal_int \
         $(TEST_LDFLAGS) \
         $(NULL)
     web_api_tests_web_api_testdriver_SOURCES = \
@@ -721,6 +748,9 @@ if ENABLE_UNITTESTS
         -Wl,--wrap=read_exporting_config \
         -Wl,--wrap=init_connectors \
         -Wl,--wrap=mark_scheduled_instances \
+        -Wl,--wrap=rrdhost_is_exportable \
+        -Wl,--wrap=rrdset_is_exportable \
+        -Wl,--wrap=exporting_calculate_value_from_stored_data \
         -Wl,--wrap=prepare_buffers \
         -Wl,--wrap=notify_workers \
         -Wl,--wrap=send_internal_metrics \
