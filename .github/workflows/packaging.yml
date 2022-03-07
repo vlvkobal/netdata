@@ -31,7 +31,7 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Prepare tools
         run: |
           sudo apt-get update && sudo apt-get install -y python3-ruamel.yaml
@@ -93,13 +93,13 @@ jobs:
     steps:
       - name: Checkout # Checkout the repo if it’s not a tag.
         if: github.event_name != 'workflow_dispatch'
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0 # We need full history for versioning
           submodules: recursive
       - name: Checkout Tag # Otherwise check out the tag that triggered this.
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           ref: ${{ github.event.ref }}
           fetch-depth: 0 # We need full history for versioning

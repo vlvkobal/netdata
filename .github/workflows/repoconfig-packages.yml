@@ -23,7 +23,7 @@ jobs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Prepare tools
         run: |
           sudo apt-get update && sudo apt-get install -y python3-ruamel.yaml
@@ -73,7 +73,7 @@ jobs:
       max-parallel: 8
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         # Unlike normally, we do not need a deep clone or submodules for this.
       - name: Fetch base image
         uses: nick-invision/retry@v2
